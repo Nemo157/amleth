@@ -6,30 +6,26 @@ extern crate hamlet;
 
 macro_rules! html {
     ({ $($input:tt)* }) => {{
-        html!(@element start ($($input)*) [] { })
+        struct Html { values: Vec<Token<'static>> }
+        html!(@element start Html ($($input)*) [] { })
     }};
 
-    (@done []
+    (@done $id:ident []
         () {
             $($value:expr,)*
         }
     ) => {{
         use ::hamlet::Token;
-        struct Html {
-            values: Vec<Token<'static>>,
-        }
-        impl Iterator for Html {
+        impl Iterator for $id {
             type Item = Token<'static>;
             fn next(&mut self) -> Option<Token<'static>> {
                 self.values.pop()
             }
         }
-        Html {
-            values: vec![$($value,)*],
-        }
+        $id { values: vec![$($value,)*] }
     }};
 
-    (@done [$($ret:tt)+]
+    (@done $id:ident [$($ret:tt)+]
         () {
             $($value:expr,)*
         }
@@ -37,45 +33,62 @@ macro_rules! html {
         html!($($ret)* { $($value,)* })
     }};
 
-    (@done [$($ret:tt)*] ($($tail:tt)+) { $($value:expr,)* }) => {{
-        html!(@element start ($($tail)*) [$($ret)*] { $($value,)* })
+    (@done $id:ident [$($ret:tt)*] ($($tail:tt)+) { $($value:expr,)* }) => {{
+        html!(@element start $id ($($tail)*) [$($ret)*] { $($value,)* })
     }};
 
-    (@element end [$($ret:tt)*] ($tag:ident $($tail:tt)*) { $($value:expr,)* }) => {{
-        html!(@done [$($ret)*] ($($tail)*) {
+    (@element end $id:ident [$($ret:tt)*] ($tag:ident $($tail:tt)*) { $($value:expr,)* }) => {{
+        html!(@done $id [$($ret)*] ($($tail)*) {
             Token::end_tag(stringify!($tag)),
             $($value,)*
         })
     }};
 
-    (@element inner [$($ret:tt)*]
+    (@element inner $id:ident [$($ret:tt)*]
         ($tag:ident { $($inner:tt)* } $($tail:tt)*) {
             $($value:expr,)*
         }
     ) => {{
         log_syntax!(inner $($inner)*);
-        html!(@element start ($($inner)*) [@element end [$($ret)*] ($tag $($tail)*)] {
+        html!(@element start $id ($($inner)*) [@element end $id [$($ret)*] ($tag $($tail)*)] {
             $($value,)*
         })
     }};
 
-    (@element start
+    (@element start $id:ident
         (%($e:expr) $($tail:tt)*) [$($ret:tt)*] {
             $($value:expr,)*
         }
     ) => {{
-        html!(@done [$($ret)*] ($($tail)*) {
+        html!(@done $id [$($ret)*] ($($tail)*) {
             Token::text($e),
             $($value,)*
         })
     }};
 
-    (@element start
+    (@element start $id:ident
+        (if $e:expr => { $($then:tt)* } else { $($otherwise:tt)* } $($tail:tt)*) [$($ret:tt)*] {
+            $($value:expr,)*
+        }
+    ) => {{
+        log_syntax!("boom!");
+        if $e {
+            html!(@element start $id ($($then)*) [@done $id [$($ret)*] ($($tail)*)] {
+                $($value,)*
+            })
+        } else {
+            html!(@element start $id ($($otherwise)*) [@done $id [$($ret)*] ($($tail)*)] {
+                $($value,)*
+            })
+        }
+    }};
+
+    (@element start $id:ident
         ($tag:tt { $($inner:tt)* } $($tail:tt)*) [$($ret:tt)*] {
             $($value:expr,)*
         }
     ) => {{
-        html!(@element inner [$($ret)*] ($tag { $($inner)* } $($tail)*) {
+        html!(@element inner $id [$($ret)*] ($tag { $($inner)* } $($tail)*) {
             Token::start_tag(stringify!($tag), attrs!()),
             $($value,)*
         })
@@ -88,15 +101,21 @@ mod test {
     #[test]
     fn it_works() {
         trace_macros!(true);
+        let you_are_cool = false;
         let html = html!({
             div {
                 p {
                     %("Hello, world!")
-                    small { %(" and you :wink:") }
+                    if you_are_cool => {
+                        small { %(" and you :wink:") }
+                    } else {
+                        small { %(" except you :squint:") }
+                    }
                 }
             }
         });
-        assert_eq!(html.collect::<Vec<_>>(), vec![
+        you_are_cool = true;
+        assert_eq!(html, vec![
             Token::start_tag("div", attrs!()),
             Token::start_tag("p", attrs!()),
             Token::text("Hello, world!"),
