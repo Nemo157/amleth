@@ -1,107 +1,132 @@
 #![feature(trace_macros)]
 #![feature(log_syntax)]
+#![feature(fnbox)]
 
 #[macro_use]
 extern crate hamlet;
 
 macro_rules! html {
     ({ $($input:tt)* }) => {{
-        struct Html { values: Vec<Token<'static>> }
-        html!(@element start Html ($($input)*) [] { })
+        html!(@element start ($($input)*) [@end] {
+            first => first
+        })
     }};
 
-    (@done $id:ident []
-        () {
-            $($value:expr,)*
-        }
-    ) => {{
+    (@finish { $current:expr }) => {{
         use ::hamlet::Token;
-        impl Iterator for $id {
+        use ::std::boxed::FnBox;
+        struct CreateNext(Box<FnBox() -> Option<(Token<'static>, CreateNext)>>);
+        struct Html { current: Option<CreateNext> }
+        impl Iterator for Html {
             type Item = Token<'static>;
             fn next(&mut self) -> Option<Token<'static>> {
-                self.values.pop()
+                if let Some(current) = self.current.take() {
+                    if let Some((ret, next)) = current.0() {
+                        self.current = Some(next);
+                        Some(ret)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             }
         }
-        $id { values: vec![$($value,)*] }
+        Html { current: Some($current) }
     }};
 
-    (@done $id:ident [$($ret:tt)+]
-        () {
-            $($value:expr,)*
-        }
-    ) => {{
-        html!($($ret)* { $($value,)* })
-    }};
-
-    (@done $id:ident [$($ret:tt)*] ($($tail:tt)+) { $($value:expr,)* }) => {{
-        html!(@element start $id ($($tail)*) [$($ret)*] { $($value,)* })
-    }};
-
-    (@element end $id:ident [$($ret:tt)*] ($tag:ident $($tail:tt)*) { $($value:expr,)* }) => {{
-        html!(@done $id [$($ret)*] ($($tail)*) {
-            Token::end_tag(stringify!($tag)),
-            $($value,)*
+    (@end { $($current:tt)* }) => {{
+        html!(@finish {
+            match CreateNext(Box::new(move || None)) {
+                $($current)*
+            }
         })
     }};
 
-    (@element inner $id:ident [$($ret:tt)*]
+    (@done [$($ret:tt)+] () { $($current:tt)* }) => {{
+        html!($($ret)* { $($current)* })
+    }};
+
+    (@done [$($ret:tt)*] ($($tail:tt)+) { $($current:tt)* }) => {{
+        html!(@element start ($($tail)*) [$($ret)*] { $($current)* })
+    }};
+
+    (@element end [$($ret:tt)*] ($tag:ident $($tail:tt)*) { $($current:tt)* }) => {{
+        html!(@done [$($ret)*] ($($tail)*) {
+            next => match CreateNext(Box::new(move || Some((Token::end_tag(stringify!($tag)), next)))) {
+                $($current)*
+            }
+        })
+    }};
+
+    (@element inner [$($ret:tt)*]
         ($tag:ident { $($inner:tt)* } $($tail:tt)*) {
-            $($value:expr,)*
+            $($current:tt)*
         }
     ) => {{
-        log_syntax!(inner $($inner)*);
-        html!(@element start $id ($($inner)*) [@element end $id [$($ret)*] ($tag $($tail)*)] {
-            $($value,)*
+        html!(@element start ($($inner)*) [@element end [$($ret)*] ($tag $($tail)*)] {
+            $($current)*
         })
     }};
 
-    (@element start $id:ident
+    (@element start
         (%($e:expr) $($tail:tt)*) [$($ret:tt)*] {
-            $($value:expr,)*
+            $($current:tt)*
         }
     ) => {{
-        html!(@done $id [$($ret)*] ($($tail)*) {
-            Token::text($e),
-            $($value,)*
+        html!(@done [$($ret)*] ($($tail)*) {
+            next => match CreateNext(Box::new(move || Some((Token::text($e), next)))) {
+                $($current)*
+            }
         })
     }};
 
-    (@element start $id:ident
-        (if $e:expr => { $($then:tt)* } else { $($otherwise:tt)* } $($tail:tt)*) [$($ret:tt)*] {
-            $($value:expr,)*
-        }
-    ) => {{
-        log_syntax!("boom!");
-        if $e {
-            html!(@element start $id ($($then)*) [@done $id [$($ret)*] ($($tail)*)] {
-                $($value,)*
-            })
-        } else {
-            html!(@element start $id ($($otherwise)*) [@done $id [$($ret)*] ($($tail)*)] {
-                $($value,)*
-            })
-        }
+    (@if end ($e:expr) { $($then:tt)* } { $($tail:tt)* } [$($ret:tt)*] { $($otherwise:tt)* }) => {{
+        html!(@done [$($ret)*] ($($tail)*) {
+            next => match CreateNext(Box::new(move || {
+                Some((Token::raw_text("/"), match if $e { match next { $($then)* } } else { match next { $($otherwise)* } } {
+                    branch => branch
+                }))
+            })) {
+                t => t
+            }
+        })
     }};
 
-    (@element start $id:ident
-        ($tag:tt { $($inner:tt)* } $($tail:tt)*) [$($ret:tt)*] {
-            $($value:expr,)*
+    (@if else ($e:expr) { $($otherwise:tt)* } { $($current:tt)* } { $($tail:tt)* } [$($ret:tt)*] { $($then:tt)* }) => {{
+        html!(@element start ($($otherwise)*) [@if end ($e) { $($then)* } { $($tail)* } [$($ret)*]] {
+            $($current)*
+        })
+    }};
+
+    (@element start
+        (if $e:expr => { $($then:tt)* } else { $($otherwise:tt)* } $($tail:tt)*) [$($ret:tt)*] {
+            $($current:tt)*
         }
     ) => {{
-        html!(@element inner $id [$($ret)*] ($tag { $($inner)* } $($tail)*) {
-            Token::start_tag(stringify!($tag), attrs!()),
-            $($value,)*
+        html!(@element start ($($then)*) [@if else ($e) { $($otherwise)* } { $($current)* } { $($tail)* } [$($ret)*]] {
+            $($current)*
+        })
+    }};
+
+    (@element start
+        ($tag:tt { $($inner:tt)* } $($tail:tt)*) [$($ret:tt)*] {
+            $($current:tt)*
+        }
+    ) => {{
+        html!(@element inner [$($ret)*] ($tag { $($inner)* } $($tail)*) {
+            next => match CreateNext(Box::new(move || Some((Token::start_tag(stringify!($tag), attrs!()), next)))) {
+                $($current)*
+            }
         })
     }};
 }
 
-#[cfg(test)]
-mod test {
+pub mod test {
     use hamlet::Token;
-    #[test]
-    fn it_works() {
-        trace_macros!(true);
-        let you_are_cool = false;
+    pub fn it_works() {
+        // trace_macros!(true);
+        let mut you_are_cool = false;
         let html = html!({
             div {
                 p {
@@ -114,13 +139,36 @@ mod test {
                 }
             }
         });
+        let html2 = html!({
+            div {
+                p {
+                    %("Hello, world!")
+                    if you_are_cool => {
+                        small { %(" and you :wink:") }
+                    } else {
+                        small { %(" except you :squint:") }
+                    }
+                }
+            }
+        });
         you_are_cool = true;
-        assert_eq!(html, vec![
+        assert_eq!(html.collect::<Vec<_>>(), vec![
             Token::start_tag("div", attrs!()),
             Token::start_tag("p", attrs!()),
             Token::text("Hello, world!"),
             Token::start_tag("small", attrs!()),
             Token::text(" and you :wink:"),
+            Token::end_tag("small"),
+            Token::end_tag("p"),
+            Token::end_tag("div"),
+        ]);
+        you_are_cool = false;
+        assert_eq!(html2.collect::<Vec<_>>(), vec![
+            Token::start_tag("div", attrs!()),
+            Token::start_tag("p", attrs!()),
+            Token::text("Hello, world!"),
+            Token::start_tag("small", attrs!()),
+            Token::text(" except you :squint:"),
             Token::end_tag("small"),
             Token::end_tag("p"),
             Token::end_tag("div"),
