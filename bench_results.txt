@@ -1,5 +1,7 @@
-amleth:       545 ns/iter (+/- 87)
-hamlet:       358 ns/iter (+/- 107)
-horrorshow:   190 ns/iter (+/- 86)
-maud:         227 ns/iter (+/- 14)
+amleth:             545 ns/iter (+/- 87)
+hamlet:             358 ns/iter (+/- 107)
+hamlet prep:        328 ns/iter (+/- 61)
+horrorshow:         190 ns/iter (+/- 86)
+horrorshow prep:    195 ns/iter (+/- 61)
+maud:               227 ns/iter (+/- 14)
 
