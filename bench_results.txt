@@ -1,0 +1,3 @@
+amleth:       619 ns/iter (+/- 673)
+horrorshow:   216 ns/iter (+/- 72)
+maud:         240 ns/iter (+/- 134)

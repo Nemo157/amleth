@@ -5,3 +5,8 @@ authors = ["Wim Looman <wim@nemo157.com>"]
 
 [dependencies]
 hamlet = "0.2.1"
+
+[dev_dependencies]
+maud = "0.8.0"
+maud_macros = "0.8.0"
+horrorshow = "0.5.5"
