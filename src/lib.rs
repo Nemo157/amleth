@@ -2,9 +2,10 @@
 #![feature(log_syntax)]
 #![feature(fnbox)]
 
-#[macro_use]
+#[cfg_attr(test, macro_use)]
 extern crate hamlet;
 
+#[macro_export]
 macro_rules! html {
     ({ $($input:tt)* }) => {{
         html!(@element start ($($input)*) [@end] {
@@ -15,7 +16,7 @@ macro_rules! html {
     (@finish { $current:expr }) => {{
         use ::hamlet::Token;
         use ::std::boxed::FnBox;
-        struct CreateNext(Box<FnBox() -> Option<(Token<'static>, CreateNext)>>);
+        struct CreateNext(Box<FnBox() -> Option<(Option<Token<'static>>, CreateNext)>>);
         struct Html { current: Option<CreateNext> }
         impl Iterator for Html {
             type Item = Token<'static>;
@@ -23,7 +24,7 @@ macro_rules! html {
                 if let Some(current) = self.current.take() {
                     if let Some((ret, next)) = current.0() {
                         self.current = Some(next);
-                        Some(ret)
+                        ret.or_else(|| self.next())
                     } else {
                         None
                     }
@@ -53,7 +54,7 @@ macro_rules! html {
 
     (@element end [$($ret:tt)*] ($tag:ident $($tail:tt)*) { $($current:tt)* }) => {{
         html!(@done [$($ret)*] ($($tail)*) {
-            next => match CreateNext(Box::new(move || Some((Token::end_tag(stringify!($tag)), next)))) {
+            next => match CreateNext(Box::new(move || Some((Some(Token::end_tag(stringify!($tag))), next)))) {
                 $($current)*
             }
         })
@@ -75,7 +76,7 @@ macro_rules! html {
         }
     ) => {{
         html!(@done [$($ret)*] ($($tail)*) {
-            next => match CreateNext(Box::new(move || Some((Token::text($e), next)))) {
+            next => match CreateNext(Box::new(move || Some((Some(Token::text($e)), next)))) {
                 $($current)*
             }
         })
@@ -84,7 +85,7 @@ macro_rules! html {
     (@if end ($e:expr) { $($then:tt)* } { $($tail:tt)* } [$($ret:tt)*] { $($otherwise:tt)* }) => {{
         html!(@done [$($ret)*] ($($tail)*) {
             next => match CreateNext(Box::new(move || {
-                Some((Token::raw_text("/"), match if $e { match next { $($then)* } } else { match next { $($otherwise)* } } {
+                Some((None, match if $e { match next { $($then)* } } else { match next { $($otherwise)* } } {
                     branch => branch
                 }))
             })) {
@@ -115,18 +116,20 @@ macro_rules! html {
         }
     ) => {{
         html!(@element inner [$($ret)*] ($tag { $($inner)* } $($tail)*) {
-            next => match CreateNext(Box::new(move || Some((Token::start_tag(stringify!($tag), attrs!()), next)))) {
+            next => match CreateNext(Box::new(move || Some((Some(Token::start_tag(stringify!($tag), $crate::hamlet::attr::AttributeList::empty())), next)))) {
                 $($current)*
             }
         })
     }};
 }
 
+#[cfg(test)]
 pub mod test {
     use hamlet::Token;
+    #[test]
     pub fn it_works() {
         // trace_macros!(true);
-        let mut you_are_cool = false;
+        let mut you_are_cool = true;
         let html = html!({
             div {
                 p {
@@ -139,6 +142,7 @@ pub mod test {
                 }
             }
         });
+        you_are_cool = false;
         let html2 = html!({
             div {
                 p {
@@ -151,7 +155,6 @@ pub mod test {
                 }
             }
         });
-        you_are_cool = true;
         assert_eq!(html.collect::<Vec<_>>(), vec![
             Token::start_tag("div", attrs!()),
             Token::start_tag("p", attrs!()),
@@ -162,7 +165,6 @@ pub mod test {
             Token::end_tag("p"),
             Token::end_tag("div"),
         ]);
-        you_are_cool = false;
         assert_eq!(html2.collect::<Vec<_>>(), vec![
             Token::start_tag("div", attrs!()),
             Token::start_tag("p", attrs!()),
