@@ -3,7 +3,7 @@
 #![feature(fnbox)]
 
 #[cfg_attr(test, macro_use)]
-extern crate hamlet;
+pub extern crate hamlet;
 
 #[macro_export]
 macro_rules! html {
@@ -14,7 +14,7 @@ macro_rules! html {
     }};
 
     (@finish { $current:expr }) => {{
-        use ::hamlet::Token;
+        use $crate::hamlet::Token;
         use ::std::boxed::FnBox;
         struct CreateNext(Box<FnBox() -> Option<(Option<Token<'static>>, CreateNext)>>);
         struct Html { current: Option<CreateNext> }
