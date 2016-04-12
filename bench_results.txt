@@ -1,4 +1,5 @@
 amleth:             545 ns/iter (+/- 87)
+amleth unboxed:     575 ns/iter (+/- 427)
 hamlet:             358 ns/iter (+/- 107)
 hamlet prep:        328 ns/iter (+/- 61)
 horrorshow:         190 ns/iter (+/- 86)
